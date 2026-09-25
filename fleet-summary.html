@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Fleet Summary Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; padding: 16px; background: #f5f6f8; }
+    .cards { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+    .card {
+      background: #fff; border-radius: 8px; padding: 16px 20px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1); flex: 1; min-width: 140px;
+    }
+    .card h3 { margin: 0 0 6px; font-size: 13px; color: #666; font-weight: 500; }
+    .card .value { font-size: 28px; font-weight: bold; color: #1a73e8; }
+    .chart-box { background: #fff; border-radius: 8px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    #status { color: #888; font-size: 13px; margin-bottom: 10px; }
+  </style>
+</head>
+<body>
+
+  <div id="status">Memuat data...</div>
+
+  <div class="cards">
+    <div class="card"><h3>Total Device</h3><div class="value" id="totalDevices">-</div></div>
+    <div class="card"><h3>Device Aktif</h3><div class="value" id="activeDevices">-</div></div>
+    <div class="card"><h3>Trip Hari Ini</h3><div class="value" id="tripsToday">-</div></div>
+  </div>
+
+  <div class="chart-box">
+    <canvas id="tripChart" height="90"></canvas>
+  </div>
+
+  <script>
+    // Geotab akan memanggil fungsi ini saat Add-In dimuat.
+    // 'api' = objek untuk memanggil MyGeotab API, 'state' = info sesi/halaman.
+    geotab.addin.fleetSummaryDashboard = function () {
+      return {
+        initialize: function (api, state, callback) {
+          loadDashboard(api);
+          callback();
+        },
+        focus: function (api, state) {
+          // Dipanggil setiap kali user membuka menu Add-In ini
+          loadDashboard(api);
+        },
+        blur: function () {
+          // Dipanggil saat user pindah ke halaman lain
+        }
+      };
+
+      function loadDashboard(api) {
+        document.getElementById('status').innerText = 'Memuat data...';
+
+        // Ambil semua device
+        api.call('Get', { typeName: 'Device' }, function (devices) {
+          document.getElementById('totalDevices').innerText = devices.length;
+
+          var active = devices.filter(function (d) {
+            return !d.activeTo || new Date(d.activeTo) > new Date();
+          });
+          document.getElementById('activeDevices').innerText = active.length;
+
+        }, function (err) {
+          document.getElementById('status').innerText = 'Gagal memuat device: ' + err;
+        });
+
+        // Ambil trip 7 hari terakhir
+        var today = new Date();
+        var fromDate = new Date();
+        fromDate.setDate(today.getDate() - 6);
+
+        api.call('Get', {
+          typeName: 'Trip',
+          search: {
+            fromDate: fromDate.toISOString(),
+            toDate: today.toISOString()
+          }
+        }, function (trips) {
+          document.getElementById('status').innerText = '';
+
+          // Hitung jumlah trip hari ini
+          var todayStr = today.toDateString();
+          var todayCount = trips.filter(function (t) {
+            return new Date(t.start).toDateString() === todayStr;
+          }).length;
+          document.getElementById('tripsToday').innerText = todayCount;
+
+          // Kelompokkan trip per hari untuk chart
+          var counts = {};
+          var labels = [];
+          for (var i = 6; i >= 0; i--) {
+            var d = new Date();
+            d.setDate(today.getDate() - i);
+            var key = d.toLocaleDateString('id-ID', { weekday: 'short', day: 'numeric' });
+            labels.push(key);
+            counts[d.toDateString()] = 0;
+          }
+          trips.forEach(function (t) {
+            var key = new Date(t.start).toDateString();
+            if (counts.hasOwnProperty(key)) counts[key]++;
+          });
+          var data = Object.values(counts);
+
+          renderChart(labels, data);
+
+        }, function (err) {
+          document.getElementById('status').innerText = 'Gagal memuat trip: ' + err;
+        });
+      }
+
+      var chartInstance = null;
+      function renderChart(labels, data) {
+        var ctx = document.getElementById('tripChart').getContext('2d');
+        if (chartInstance) chartInstance.destroy();
+        chartInstance = new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels: labels,
+            datasets: [{
+              label: 'Jumlah Trip',
+              data: data,
+              backgroundColor: '#1a73e8'
+            }]
+          },
+          options: {
+            responsive: true,
+            plugins: { legend: { display: false } },
+            scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } }
+          }
+        });
+      }
+    };
+  </script>
+</body>
+</html>
